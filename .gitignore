@@ -1,0 +1,36 @@
+# General exception
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Sensitive data files
+*.key
+*.pem
+*.cert
+*.crt
+
+# IDE
+.idea/
+*.iml
+modules.xml
+vcs.xml
+*.swp
+*.swo
+
+# Go
+bin/
+vendor/
+dist/
+tmp/
+*.exe
+*.test
+*.out
+*.dll
+*.so
+*.dylib
+
+# OS
+.DS_Store
+Thumbs.db
