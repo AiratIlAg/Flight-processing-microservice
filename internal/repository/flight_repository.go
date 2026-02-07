@@ -2,7 +2,7 @@ package repository
 
 import (
 	"context"
-	"flight_processing/internal/service"
+	"flight_processing/internal/models"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -17,7 +17,7 @@ func NewFlightRepository(db *pgxpool.Pool) *FlightRepository {
 	return &FlightRepository{db: db}
 }
 
-func (r *FlightRepository) Upsert(ctx context.Context, f *service.FlightData) error {
+func (r *FlightRepository) Upsert(ctx context.Context, f *models.FlightData) error {
 	query, args, err := psql.
 		Insert("flights").
 		Columns(
@@ -53,7 +53,7 @@ func (r *FlightRepository) Upsert(ctx context.Context, f *service.FlightData) er
 	return err
 }
 
-func (r *FlightRepository) Get(ctx context.Context, flightNumber string, departureDate time.Time) (*service.FlightData, error) {
+func (r *FlightRepository) Get(ctx context.Context, flightNumber string, departureDate time.Time) (*models.FlightData, error) {
 	query, args, err := psql.
 		Select(
 			"aircraft_type",
@@ -73,7 +73,7 @@ func (r *FlightRepository) Get(ctx context.Context, flightNumber string, departu
 		return nil, err
 	}
 
-	var f service.FlightData
+	var f models.FlightData
 	err = r.db.QueryRow(ctx, query, args...).Scan(
 		&f.AircraftType,
 		&f.FlightNumber,
