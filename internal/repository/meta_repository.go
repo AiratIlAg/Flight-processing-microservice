@@ -2,7 +2,7 @@ package repository
 
 import (
 	"context"
-	"flight_processing/internal/service"
+	"flight_processing/internal/models"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -19,7 +19,7 @@ func NewMetaRepository(db *pgxpool.Pool) *MetaRepository {
 	return &MetaRepository{db: db}
 }
 
-func (r *MetaRepository) Create(ctx context.Context, meta *service.FlightMeta) error {
+func (r *MetaRepository) Create(ctx context.Context, meta *models.FlightMeta) error {
 	query, args, err := psql.
 		Insert("flight_meta").
 		Columns(
@@ -64,7 +64,7 @@ func (r *MetaRepository) GetByFlightNumber(
 	status string,
 	limit int,
 	offset int,
-) ([]*service.FlightMeta, int, error) {
+) ([]*models.FlightMeta, int, error) {
 
 	builder := psql.
 		Select(
@@ -96,10 +96,10 @@ func (r *MetaRepository) GetByFlightNumber(
 	}
 	defer rows.Close()
 
-	var result []*service.FlightMeta
+	var result []*models.FlightMeta
 
 	for rows.Next() {
-		var m service.FlightMeta
+		var m models.FlightMeta
 		err := rows.Scan(
 			&m.ID,
 			&m.FlightNumber,
