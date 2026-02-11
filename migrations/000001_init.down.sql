@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS flights;
+DROP TABLE IF EXISTS flight_meta;
