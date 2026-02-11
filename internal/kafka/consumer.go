@@ -2,123 +2,158 @@ package kafka
 
 import (
 	"context"
-	"encoding/json"
-	"flight_processing/internal/models"
-	"flight_processing/internal/repository"
+	"fmt"
 	"log"
+	"time"
 
 	"github.com/IBM/sarama"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type Consumer struct {
-	//подключается к брокерам, читает топики, распред партиции, управляет офсетом
-	group sarama.ConsumerGroup
+type MessageProcessor interface {
+	ProcessFlightMessage(message []byte) error
+}
 
-	db         *pgxpool.Pool
-	metaRepo   *repository.MetaRepository
-	flightRepo *repository.FlightRepository
+type Consumer struct {
+	group   sarama.ConsumerGroup
+	topic   string
+	handler sarama.ConsumerGroupHandler
+	logger  *log.Logger
 }
 
 func NewConsumer(
 	brokers []string,
 	groupID string,
-	db *pgxpool.Pool,
-	metaRepo *repository.MetaRepository,
-	flightRepo *repository.FlightRepository,
+	topic string,
+	processor MessageProcessor,
+	logger *log.Logger,
 ) (*Consumer, error) {
+	if logger == nil {
+		logger = log.Default()
+	}
 
 	cfg := sarama.NewConfig()
 
-	cfg.Version = sarama.V2_8_0_0
-	cfg.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{sarama.NewBalanceStrategyRange()}
-	cfg.Consumer.Offsets.Initial = sarama.OffsetNewest
+	cfg.Consumer.Return.Errors = true
+	cfg.Consumer.Offsets.Initial = sarama.OffsetOldest
+
+	// Важно: коммит только руками после успешной обработки
+	cfg.Consumer.Offsets.AutoCommit.Enable = false
+
+	cfg.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{
+		sarama.NewBalanceStrategyRange(),
+	}
+	cfg.Consumer.Group.Session.Timeout = 30 * time.Second
+	cfg.Consumer.Group.Heartbeat.Interval = 3 * time.Second
 
 	group, err := sarama.NewConsumerGroup(brokers, groupID, cfg)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create consumer group: %w", err)
+	}
+
+	h := &flightGroupHandler{
+		processor: processor,
+		logger:    logger,
 	}
 
 	return &Consumer{
-		group:      group,
-		db:         db,
-		metaRepo:   metaRepo,
-		flightRepo: flightRepo,
+		group:   group,
+		topic:   topic,
+		handler: h,
+		logger:  logger,
 	}, nil
 }
 
-func (c *Consumer) Start(ctx context.Context, topics []string) {
-	h := &handler{c: c}
+func (c *Consumer) Start(ctx context.Context) error {
+	// Ошибки группы в отдельный поток логов
+	go func() {
+		for err := range c.group.Errors() {
+			c.logger.Printf("consumer group error: %v", err)
+		}
+	}()
 
 	for {
-		err := c.group.Consume(ctx, topics, h)
+		err := c.group.Consume(ctx, []string{c.topic}, c.handler)
 		if err != nil {
-			log.Println("consumer error:", err)
+			if ctx.Err() != nil {
+				return nil
+			}
+			c.logger.Printf("consume loop error: %v", err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		if ctx.Err() != nil {
+			return nil
 		}
 	}
 }
 
-type handler struct {
-	c *Consumer
+func (c *Consumer) Close() error {
+	return c.group.Close()
 }
 
-func (h *handler) Setup(sarama.ConsumerGroupSession) error   { return nil }
-func (h *handler) Cleanup(sarama.ConsumerGroupSession) error { return nil }
+type flightGroupHandler struct {
+	processor MessageProcessor
+	logger    *log.Logger
+}
 
-func (h *handler) ConsumeClaim(
-	sess sarama.ConsumerGroupSession,
+func (h *flightGroupHandler) Setup(_ sarama.ConsumerGroupSession) error   { return nil }
+func (h *flightGroupHandler) Cleanup(_ sarama.ConsumerGroupSession) error { return nil }
+
+func (h *flightGroupHandler) ConsumeClaim(
+	session sarama.ConsumerGroupSession,
 	claim sarama.ConsumerGroupClaim,
 ) error {
-
-	//кафка отдаёт сообщения, мы читаем поток
-	for msg := range claim.Messages() {
-
-		var km FlightKafkaMessage
-		if err := json.Unmarshal(msg.Value, &km); err != nil {
-			log.Println("bad message:", err)
-			continue // битые сообщения пропускаем
+	for kafkaMsg := range claim.Messages() {
+		// retry до успеха (или пока не отменён контекст)
+		if err := h.processWithRetry(session.Context(), kafkaMsg); err != nil {
+			// Сообщение НЕ отмечаем и НЕ коммитим -> будет прочитано снова
+			return err
 		}
-		//обрабокта сообщений
-		err := h.processMessage(sess.Context(), &km)
-		if err != nil {
-			log.Println("process error, will retry:", err)
-			continue // НЕ коммитим offset → Kafka перечитает
-		}
-		//коммит только при успехе
-		sess.MarkMessage(msg, "")
+
+		// Только после успеха:
+		session.MarkMessage(kafkaMsg, "")
+		session.Commit()
 	}
-
 	return nil
 }
 
-func (h *handler) processMessage(ctx context.Context, km *FlightKafkaMessage) error {
-	//начинаем транзакцию
-	tx, err := h.c.db.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	//если что то упало
-	defer tx.Rollback(ctx)
+func (h *flightGroupHandler) processWithRetry(ctx context.Context, m *sarama.ConsumerMessage) error {
+	attempt := 0
 
-	fd := models.FlightData{
-		AircraftType:    km.Request.AircraftType,
-		FlightNumber:    km.Request.FlightNumber,
-		DepartureDate:   km.Request.DepartureDate,
-		ArrivalDate:     km.Request.ArrivalDate,
-		PassengersCount: km.Request.PassengersCount,
-	}
+	for {
+		attempt++
+		err := h.processOnce(ctx, m)
+		if err == nil {
+			return nil
+		}
 
-	// upsert flights
-	err = h.c.flightRepo.Upsert(ctx, &fd)
-	if err != nil {
-		return err
-	}
+		backoff := retryBackoff(attempt)
+		h.logger.Printf(
+			"process kafka message failed topic=%s partition=%d offset=%d attempt=%d err=%v; retry in %s",
+			m.Topic, m.Partition, m.Offset, attempt, err, backoff,
+		)
 
-	// update meta status
-	err = h.c.metaRepo.UpdateStatus(ctx, km.MetaID, "processed")
-	if err != nil {
-		return err
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
 	}
+}
 
-	return tx.Commit(ctx)
+func (h *flightGroupHandler) processOnce(ctx context.Context, m *sarama.ConsumerMessage) error {
+	if err := h.processor.ProcessFlightMessage(m.Value); err != nil {
+		return fmt.Errorf("process message in service: %w", err)
+	}
+	return nil
+}
+
+func retryBackoff(attempt int) time.Duration {
+	// линейный backoff 1..30 сек
+	d := time.Duration(attempt) * time.Second
+	if d > 30*time.Second {
+		d = 30 * time.Second
+	}
+	return d
 }

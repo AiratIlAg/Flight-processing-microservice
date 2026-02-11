@@ -32,8 +32,10 @@ services:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
 
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
 
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
@@ -42,18 +44,18 @@ services:
     image: confluentinc/cp-kafka:7.6.1
     depends_on:
       - kafka
-    entrypoint: [ "/bin/sh", "-c" ]
+    entrypoint: [ "/bin/sh", "-ec" ]
     command: |
-      "
-      echo 'waiting kafka...';
-      cub kafka-ready -b kafka:9092 1 20;
-      kafka-topics --create \
-        --if-not-exists \
-        --bootstrap-server kafka:9092 \
-        --replication-factor 1 \
-        --partitions 3 \
-        --topic flight_requests;
-      "
+      echo "waiting for kafka..."
+      for i in $(seq 1 60); do
+        kafka-topics --bootstrap-server kafka:29092 --list >/dev/null 2>&1 && break
+        sleep 2
+      done
+      
+      echo "creating topic flight_requests..."
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic flight_requests --partitions 3 --replication-factor 1
+      
+      echo "done"
 
 volumes:
   pgdata:

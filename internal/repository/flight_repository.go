@@ -2,23 +2,42 @@ package repository
 
 import (
 	"context"
-	"flight_processing/internal/models"
+	"errors"
+	"fmt"
 	"time"
 
+	"flight_processing/internal/models"
 	sq "github.com/Masterminds/squirrel"
+
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type FlightRepository struct {
 	db *pgxpool.Pool
+	sb sq.StatementBuilderType
 }
 
 func NewFlightRepository(db *pgxpool.Pool) *FlightRepository {
-	return &FlightRepository{db: db}
+	return &FlightRepository{
+		db: db,
+		sb: sq.StatementBuilder.PlaceholderFormat(sq.Dollar),
+	}
 }
 
-func (r *FlightRepository) Upsert(ctx context.Context, f *models.FlightData) error {
-	query, args, err := psql.
+// Upsert(flight *FlightData) error - вставка или обновление по (flight_number, departure_date)
+func (r *FlightRepository) Upsert(flight *models.FlightData) error {
+	if flight == nil {
+		return fmt.Errorf("flight is nil")
+	}
+	if flight.FlightNumber == "" {
+		return fmt.Errorf("flight_number is empty")
+	}
+	if flight.PassengersCount < 0 {
+		return fmt.Errorf("passengers_count must be >= 0")
+	}
+
+	query := r.sb.
 		Insert("flights").
 		Columns(
 			"flight_number",
@@ -26,35 +45,46 @@ func (r *FlightRepository) Upsert(ctx context.Context, f *models.FlightData) err
 			"aircraft_type",
 			"arrival_date",
 			"passengers_count",
-			"updated_at",
 		).
 		Values(
-			f.FlightNumber,
-			f.DepartureDate,
-			f.AircraftType,
-			f.ArrivalDate,
-			f.PassengersCount,
-			time.Now(),
+			flight.FlightNumber,
+			flight.DepartureDate,
+			flight.AircraftType,
+			flight.ArrivalDate,
+			flight.PassengersCount,
 		).
 		Suffix(`
-			ON CONFLICT (flight_number, departure_date)
-			DO UPDATE SET
-				aircraft_type = EXCLUDED.aircraft_type,
-				arrival_date = EXCLUDED.arrival_date,
-				passengers_count = EXCLUDED.passengers_count,
-				updated_at = EXCLUDED.updated_at
-		`).
-		ToSql()
+ON CONFLICT (flight_number, departure_date)
+DO UPDATE SET
+	aircraft_type = EXCLUDED.aircraft_type,
+	arrival_date = EXCLUDED.arrival_date,
+	passengers_count = EXCLUDED.passengers_count,
+	updated_at = NOW()
+`)
+
+	sqlStr, args, err := query.ToSql()
 	if err != nil {
-		return err
+		return fmt.Errorf("build upsert flight sql: %w", err)
 	}
 
-	_, err = r.db.Exec(ctx, query, args...)
-	return err
+	ctx := context.Background()
+	if _, err := r.db.Exec(ctx, sqlStr, args...); err != nil {
+		return fmt.Errorf("upsert flight: %w", err)
+	}
+
+	return nil
 }
 
-func (r *FlightRepository) Get(ctx context.Context, flightNumber string, departureDate time.Time) (*models.FlightData, error) {
-	query, args, err := psql.
+// Get(flightNumber string, departureDate time.Time) (*FlightData, error)
+func (r *FlightRepository) Get(flightNumber string, departureDate time.Time) (*models.FlightData, error) {
+	if flightNumber == "" {
+		return nil, fmt.Errorf("flight_number is empty")
+	}
+	if departureDate.IsZero() {
+		return nil, fmt.Errorf("departure_date is zero")
+	}
+
+	query := r.sb.
 		Select(
 			"aircraft_type",
 			"flight_number",
@@ -68,13 +98,16 @@ func (r *FlightRepository) Get(ctx context.Context, flightNumber string, departu
 			"flight_number":  flightNumber,
 			"departure_date": departureDate,
 		}).
-		ToSql()
+		Limit(1)
+
+	sqlStr, args, err := query.ToSql()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build get flight sql: %w", err)
 	}
 
+	ctx := context.Background()
 	var f models.FlightData
-	err = r.db.QueryRow(ctx, query, args...).Scan(
+	err = r.db.QueryRow(ctx, sqlStr, args...).Scan(
 		&f.AircraftType,
 		&f.FlightNumber,
 		&f.DepartureDate,
@@ -82,9 +115,60 @@ func (r *FlightRepository) Get(ctx context.Context, flightNumber string, departu
 		&f.PassengersCount,
 		&f.UpdatedAt,
 	)
-
 	if err != nil {
-		return nil, err
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get flight: %w", err)
 	}
+
 	return &f, nil
+}
+
+func (r *FlightRepository) UpsertTx(ctx context.Context, tx pgx.Tx, flight *models.FlightData) error {
+	if flight == nil {
+		return fmt.Errorf("flight is nil")
+	}
+	if flight.FlightNumber == "" {
+		return fmt.Errorf("flight_number is empty")
+	}
+	if flight.PassengersCount < 0 {
+		return fmt.Errorf("passengers_count must be >= 0")
+	}
+
+	query := r.sb.
+		Insert("flights").
+		Columns(
+			"flight_number",
+			"departure_date",
+			"aircraft_type",
+			"arrival_date",
+			"passengers_count",
+		).
+		Values(
+			flight.FlightNumber,
+			flight.DepartureDate,
+			flight.AircraftType,
+			flight.ArrivalDate,
+			flight.PassengersCount,
+		).
+		Suffix(`
+ON CONFLICT (flight_number, departure_date)
+DO UPDATE SET
+	aircraft_type = EXCLUDED.aircraft_type,
+	arrival_date = EXCLUDED.arrival_date,
+	passengers_count = EXCLUDED.passengers_count,
+	updated_at = NOW()
+`)
+
+	sqlStr, args, err := query.ToSql()
+	if err != nil {
+		return fmt.Errorf("build upsert flight tx sql: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, sqlStr, args...); err != nil {
+		return fmt.Errorf("upsert flight tx: %w", err)
+	}
+
+	return nil
 }

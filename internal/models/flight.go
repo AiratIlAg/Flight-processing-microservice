@@ -11,12 +11,12 @@ type FlightRequest struct {
 }
 
 type FlightMeta struct {
-	ID            int       `db:"id"`
-	FlightNumber  string    `db:"flight_number"`
-	DepartureDate time.Time `db:"departure_date"`
-	Status        string    `db:"status"` // pending, processed, error
-	CreatedAt     time.Time `db:"created_at"`
-	ProcessedAt   time.Time `db:"processed_at"`
+	ID            int        `db:"id"`
+	FlightNumber  string     `db:"flight_number"`
+	DepartureDate time.Time  `db:"departure_date"`
+	Status        string     `db:"status"` // pending, processed, error
+	CreatedAt     time.Time  `db:"created_at"`
+	ProcessedAt   *time.Time `db:"processed_at"` // pointer, т.к. может быть NULL
 }
 
 type FlightData struct {
