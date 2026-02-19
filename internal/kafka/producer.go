@@ -47,27 +47,38 @@ func (p *Producer) SendFlightMessage(metaID int, request *models.FlightRequest) 
 	if request == nil {
 		return fmt.Errorf("request is nil")
 	}
-	if metaID <= 0 {
-		return fmt.Errorf("invalid metaID")
-	}
 
-	payload := NewFlightMessage(metaID, request)
-	b, err := json.Marshal(payload)
+	msg := NewFlightMessage(metaID, request)
+	b, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("marshal flight message: %w", err)
 	}
 
-	msg := &sarama.ProducerMessage{
-		Topic:     p.topic,
-		Key:       sarama.StringEncoder(request.FlightNumber),
-		Value:     sarama.ByteEncoder(b),
-		Timestamp: time.Now(),
+	return p.SendRaw(p.topic, request.FlightNumber, b)
+}
+
+// SendRaw отправляет уже сформированный payload в указанный topic.
+// key можно передать пустым, но лучше (для порядка по ключу) использовать flight_number.
+func (p *Producer) SendRaw(topic string, key string, payload []byte) error {
+	if topic == "" {
+		topic = p.topic
+	}
+	if len(payload) == 0 {
+		return fmt.Errorf("payload is empty")
 	}
 
-	_, _, err = p.producer.SendMessage(msg)
+	msg := &sarama.ProducerMessage{
+		Topic:     topic,
+		Value:     sarama.ByteEncoder(payload),
+		Timestamp: time.Now(),
+	}
+	if key != "" {
+		msg.Key = sarama.StringEncoder(key)
+	}
+
+	_, _, err := p.producer.SendMessage(msg)
 	if err != nil {
 		return fmt.Errorf("send kafka message: %w", err)
 	}
-
 	return nil
 }

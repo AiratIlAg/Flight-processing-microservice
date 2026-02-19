@@ -1,0 +1,98 @@
+{
+  "uid": "flight-outbox",
+  "title": "Flight Service — Outbox",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "panels": [
+    { "type": "row", "title": "Outbox counts", "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 }, "collapsed": false },
+
+    {
+      "type": "timeseries",
+      "title": "Outbox messages count by status (current)",
+      "gridPos": { "x": 0, "y": 1, "w": 18, "h": 7 },
+      "targets": [
+        { "refId": "A", "expr": "outbox_messages_count", "legendFormat": "{{status}}" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Pending now",
+      "gridPos": { "x": 18, "y": 1, "w": 6, "h": 7 },
+      "targets": [
+        { "refId": "A", "expr": "outbox_pending_count" }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+    },
+
+    { "type": "row", "title": "Outbox throughput & retries", "gridPos": { "x": 0, "y": 8, "w": 24, "h": 1 }, "collapsed": false },
+
+    {
+      "type": "timeseries",
+      "title": "Outbox send speed (messages/min)",
+      "gridPos": { "x": 0, "y": 9, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "rate(outbox_messages_sent_total[1m]) * 60", "legendFormat": "sent/min" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Retries (per minute)",
+      "gridPos": { "x": 12, "y": 9, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "rate(outbox_retries_total[1m]) * 60", "legendFormat": "retries/min" }
+      ]
+    },
+
+    { "type": "row", "title": "Durations & lag", "gridPos": { "x": 0, "y": 17, "w": 24, "h": 1 }, "collapsed": false },
+
+    {
+      "type": "timeseries",
+      "title": "Outbox processing duration p95 (seconds)",
+      "gridPos": { "x": 0, "y": 18, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum(rate(outbox_processing_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Outbox lag p95 (seconds) — created → send attempt",
+      "gridPos": { "x": 12, "y": 18, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum(rate(outbox_lag_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+
+    { "type": "row", "title": "Errors", "gridPos": { "x": 0, "y": 26, "w": 24, "h": 1 }, "collapsed": false },
+
+    {
+      "type": "timeseries",
+      "title": "Outbox failed total (counter)",
+      "gridPos": { "x": 0, "y": 27, "w": 12, "h": 7 },
+      "targets": [
+        { "refId": "A", "expr": "outbox_messages_failed_total", "legendFormat": "failed total" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Kafka producer send errors (per second)",
+      "gridPos": { "x": 12, "y": 27, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(kafka_errors_total{component=\"producer\",operation=\"send\"}[1m]))",
+          "legendFormat": "producer send errors/s"
+        }
+      ]
+    }
+  ]
+}

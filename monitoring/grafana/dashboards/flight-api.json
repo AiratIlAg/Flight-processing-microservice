@@ -1,0 +1,73 @@
+{
+  "uid": "flight-api",
+  "title": "Flight Service — API",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "panels": [
+    { "type": "row", "title": "API Overview", "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 }, "collapsed": false },
+
+    {
+      "type": "timeseries",
+      "title": "Requests per second (by method + route)",
+      "gridPos": { "x": 0, "y": 1, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_requests_total[1m])) by (method, route)",
+          "legendFormat": "{{method}} {{route}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Average latency (seconds) by route",
+      "gridPos": { "x": 0, "y": 9, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_request_duration_seconds_sum[1m])) by (route) / sum(rate(http_request_duration_seconds_count[1m])) by (route)",
+          "legendFormat": "{{route}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "p95 latency (seconds) overall",
+      "gridPos": { "x": 12, "y": 9, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Errors (4xx/5xx) per second by route + code",
+      "gridPos": { "x": 0, "y": 17, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_requests_total{code=~\"4..|5..\"}[1m])) by (route, code)",
+          "legendFormat": "{{route}} {{code}}"
+        }
+      ]
+    },
+    {
+      "type": "heatmap",
+      "title": "Response time distribution (heatmap, overall)",
+      "gridPos": { "x": 0, "y": 25, "w": 24, "h": 10 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_request_duration_seconds_bucket[1m])) by (le)",
+          "format": "heatmap",
+          "legendFormat": "{{le}}"
+        }
+      ]
+    }
+  ]
+}

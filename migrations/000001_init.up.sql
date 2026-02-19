@@ -1,9 +1,9 @@
 -- Таблица метаданных обработки запросов
 CREATE TABLE IF NOT EXISTS flight_meta (
-                                           id              BIGSERIAL PRIMARY KEY,
-                                           flight_number   TEXT        NOT NULL,
-                                           departure_date  TIMESTAMPTZ NOT NULL,
-                                           status          TEXT        NOT NULL CHECK (status IN ('pending', 'processed', 'error')),
+    id              BIGSERIAL PRIMARY KEY,
+    flight_number   TEXT        NOT NULL,
+    departure_date  TIMESTAMPTZ NOT NULL,
+    status          TEXT        NOT NULL CHECK (status IN ('pending', 'processed', 'error')),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     processed_at    TIMESTAMPTZ NULL
     );
@@ -19,11 +19,11 @@ CREATE INDEX IF NOT EXISTS idx_flight_meta_flight_number_departure
 
 -- Основная таблица актуальных данных по рейсам
 CREATE TABLE IF NOT EXISTS flights (
-                                       flight_number     TEXT        NOT NULL,
-                                       departure_date    TIMESTAMPTZ NOT NULL,
-                                       aircraft_type     TEXT        NOT NULL,
-                                       arrival_date      TIMESTAMPTZ NOT NULL,
-                                       passengers_count  INTEGER     NOT NULL CHECK (passengers_count >= 0),
+    flight_number     TEXT        NOT NULL,
+    departure_date    TIMESTAMPTZ NOT NULL,
+    aircraft_type     TEXT        NOT NULL,
+    arrival_date      TIMESTAMPTZ NOT NULL,
+    passengers_count  INTEGER     NOT NULL CHECK (passengers_count >= 0),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     CONSTRAINT flights_pk PRIMARY KEY (flight_number, departure_date)

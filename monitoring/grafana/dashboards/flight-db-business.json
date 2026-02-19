@@ -1,0 +1,77 @@
+{
+  "uid": "flight-db-business",
+  "title": "Flight Service — DB & Business",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "panels": [
+    { "type": "row", "title": "Business", "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 }, "collapsed": false },
+
+    {
+      "type": "stat",
+      "title": "Total flights processed",
+      "gridPos": { "x": 0, "y": 1, "w": 6, "h": 6 },
+      "targets": [
+        { "refId": "A", "expr": "flights_processed_total" }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Flights processed (per second)",
+      "gridPos": { "x": 6, "y": 1, "w": 18, "h": 6 },
+      "targets": [
+        { "refId": "A", "expr": "rate(flights_processed_total[1m])", "legendFormat": "processed/s" }
+      ]
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Average passengers per flight (moving)",
+      "gridPos": { "x": 0, "y": 7, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(passengers_count_sum[5m]) / rate(passengers_count_count[5m])",
+          "legendFormat": "avg"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Passengers p95 (moving)",
+      "gridPos": { "x": 12, "y": 7, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum(rate(passengers_count_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+
+    { "type": "row", "title": "Aircraft types & statuses", "gridPos": { "x": 0, "y": 15, "w": 24, "h": 1 }, "collapsed": false },
+
+    {
+      "type": "timeseries",
+      "title": "Aircraft types processed (per minute) — top series",
+      "gridPos": { "x": 0, "y": 16, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(10, sum(rate(aircraft_type_processed_total[5m])) by (aircraft_type))",
+          "legendFormat": "{{aircraft_type}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "flight_meta rows by status (current)",
+      "gridPos": { "x": 0, "y": 24, "w": 24, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "flight_meta_status_count", "legendFormat": "{{status}}" }
+      ]
+    }
+  ]
+}

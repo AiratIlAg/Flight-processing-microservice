@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"flight_processing/internal/models"
+
 	sq "github.com/Masterminds/squirrel"
 	"github.com/jackc/pgx/v5"
 
@@ -233,5 +234,37 @@ func (r *MetaRepository) UpdateStatusTx(ctx context.Context, tx pgx.Tx, id int, 
 		return ErrNotFound
 	}
 
+	return nil
+}
+
+// CreateTx - то же что Create, но в рамках транзакции (нужно для outbox pattern)
+func (r *MetaRepository) CreateTx(ctx context.Context, tx pgx.Tx, meta *models.FlightMeta) error {
+	if meta == nil {
+		return fmt.Errorf("meta is nil")
+	}
+	if meta.FlightNumber == "" {
+		return fmt.Errorf("flight_number is empty")
+	}
+
+	meta.Status = StatusPending
+
+	q := r.sb.
+		Insert("flight_meta").
+		Columns("flight_number", "departure_date", "status").
+		Values(meta.FlightNumber, meta.DepartureDate, StatusPending).
+		Suffix("RETURNING id, created_at")
+
+	sqlStr, args, err := q.ToSql()
+	if err != nil {
+		return fmt.Errorf("build create meta tx sql: %w", err)
+	}
+
+	var id int64
+	if err := tx.QueryRow(ctx, sqlStr, args...).Scan(&id, &meta.CreatedAt); err != nil {
+		return fmt.Errorf("create meta tx: %w", err)
+	}
+
+	meta.ID = int(id)
+	meta.ProcessedAt = nil
 	return nil
 }
