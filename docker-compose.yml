@@ -59,24 +59,25 @@ services:
       kafka:
         condition: service_healthy
     entrypoint: [ "/bin/bash", "-ec" ]
-    command: |
-      echo "Kafka is healthy. Listing topics BEFORE:"
-      kafka-topics --bootstrap-server kafka:9092 --list || true
-      
-      echo "Creating topic flight_requests..."
-      kafka-topics --bootstrap-server kafka:9092 \
-        --create --if-not-exists \
-        --topic flight_requests \
-        --replication-factor 1 \
-        --partitions 3
-      
-      echo "Describe topic:"
-      kafka-topics --bootstrap-server kafka:9092 --describe --topic flight_requests
-      
-      echo "Listing topics AFTER:"
-      kafka-topics --bootstrap-server kafka:9092 --list
-      
-      echo "kafka-init done"
+    command:
+      - |
+        echo "Kafka is healthy. Listing topics BEFORE:"
+        kafka-topics --bootstrap-server kafka:9092 --list || true
+
+        echo "Creating topic flight_requests..."
+        kafka-topics --bootstrap-server kafka:9092 \
+          --create --if-not-exists \
+          --topic flight_requests \
+          --replication-factor 1 \
+          --partitions 3
+
+        echo "Describe topic:"
+        kafka-topics --bootstrap-server kafka:9092 --describe --topic flight_requests
+
+        echo "Listing topics AFTER:"
+        kafka-topics --bootstrap-server kafka:9092 --list
+
+        echo "kafka-init done"
     restart: "no"
 
   app:
