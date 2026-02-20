@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"context"
+	"flight_processing/internal/metrics"
 	"fmt"
 	"log"
 	"time"
@@ -68,6 +69,7 @@ func (c *Consumer) Start(ctx context.Context) error {
 	go func() {
 		for err := range c.group.Errors() {
 			c.logger.Printf("consumer group error: %v", err)
+			metrics.IncKafkaError("consumer", "group")
 		}
 	}()
 
@@ -105,11 +107,17 @@ func (h *flightGroupHandler) ConsumeClaim(
 	claim sarama.ConsumerGroupClaim,
 ) error {
 	for kafkaMsg := range claim.Messages() {
+		lag := claim.HighWaterMarkOffset() - kafkaMsg.Offset - 1
+		metrics.SetKafkaConsumerLag(kafkaMsg.Topic, kafkaMsg.Partition, lag)
 		// retry до успеха (или пока не отменён контекст)
 		if err := h.processWithRetry(session.Context(), kafkaMsg); err != nil {
+			// (2) Ошибка обработки
+			metrics.IncKafkaError("consumer", "process")
 			// Сообщение НЕ отмечаем и НЕ коммитим -> будет прочитано снова
 			return err
 		}
+		// (3) Успешная обработка
+		metrics.IncKafkaProcessed()
 
 		// Только после успеха:
 		session.MarkMessage(kafkaMsg, "")

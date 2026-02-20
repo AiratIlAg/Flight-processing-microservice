@@ -28,12 +28,13 @@ type FlightHandler struct {
 }
 
 func NewFlightHandler(service FlightService) *FlightHandler {
-	return &FlightHandler{
-		service: service,
-	}
+	return &FlightHandler{service: service}
 }
 
 // POST /api/flights
+// 201: { "id": int, "status": "pending" }
+// 400: invalid input
+// 500: internal error
 func (h *FlightHandler) CreateFlight(w http.ResponseWriter, r *http.Request) {
 	var req models.FlightRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -46,10 +47,8 @@ func (h *FlightHandler) CreateFlight(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, service.ErrInvalidInput):
 			writeError(w, http.StatusBadRequest, err.Error())
-		case errors.Is(err, service.ErrQueueFull):
-			writeError(w, http.StatusServiceUnavailable, "message queue is full, try again later")
 		default:
-			writeError(w, http.StatusInternalServerError, "failed to create flight")
+			writeError(w, http.StatusInternalServerError, "internal error")
 		}
 		return
 	}
@@ -61,6 +60,10 @@ func (h *FlightHandler) CreateFlight(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /api/flights?flight_number=...&departure_date=...
+// 200: { "flight_number": "...", "departure_date": "...", "passengers_count": 123 }
+// 400: missing/invalid params
+// 404: not found
+// 500: internal error
 func (h *FlightHandler) GetFlight(w http.ResponseWriter, r *http.Request) {
 	flightNumber := strings.TrimSpace(r.URL.Query().Get("flight_number"))
 	departureRaw := strings.TrimSpace(r.URL.Query().Get("departure_date"))
@@ -92,12 +95,15 @@ func (h *FlightHandler) GetFlight(w http.ResponseWriter, r *http.Request) {
 	// По ТЗ здесь возвращаем минимальный набор полей.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"flight_number":    flight.FlightNumber,
-		"departure_date":   flight.DepartureDate,
+		"departure_date":   flight.DepartureDate, // time.Time -> RFC3339 в JSON
 		"passengers_count": flight.PassengersCount,
 	})
 }
 
 // GET /api/flights/{flight_number}/meta?status=&limit=
+// 200: { "flight_number": "...", "meta": [...], "pagination": {...} }
+// 400: invalid params
+// 500: internal error
 func (h *FlightHandler) GetFlightMeta(w http.ResponseWriter, r *http.Request) {
 	flightNumber := strings.TrimSpace(chi.URLParam(r, "flight_number"))
 	if flightNumber == "" {
@@ -135,7 +141,7 @@ func (h *FlightHandler) GetFlightMeta(w http.ResponseWriter, r *http.Request) {
 }
 
 func decodeJSON(r *http.Request, dst any) error {
-	dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20)) // до 1MB
+	dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
 	dec.DisallowUnknownFields()
 
 	if err := dec.Decode(dst); err != nil {
@@ -151,9 +157,7 @@ func decodeJSON(r *http.Request, dst any) error {
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{
-		"error": msg,
-	})
+	writeJSON(w, status, map[string]string{"error": msg})
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

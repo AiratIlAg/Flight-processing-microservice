@@ -6,6 +6,7 @@ import (
 	"flight_processing/internal/config"
 	"flight_processing/internal/handlers"
 	"flight_processing/internal/kafka"
+	"flight_processing/internal/metrics"
 	"flight_processing/internal/repository"
 	"flight_processing/internal/service"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 )
 
 func main() {
+	// 0) Конфиг (.env грузится внутри config.Load(), а в docker env_file подставит env)
 	cfg := config.Load()
 
 	// Контекст завершения (Ctrl+C / SIGTERM)
@@ -45,6 +47,7 @@ func main() {
 	// 3) Репозитории
 	metaRepo := repository.NewMetaRepository(dbPool)
 	flightRepo := repository.NewFlightRepository(dbPool)
+	outboxRepo := repository.NewOutboxRepository(dbPool, cfg.OutboxMaxRetries)
 
 	// 4) Kafka Producer
 	producer, err := kafka.NewSyncProducer(cfg.KafkaBrokers, cfg.KafkaTopic)
@@ -58,11 +61,10 @@ func main() {
 		dbPool,
 		metaRepo,
 		flightRepo,
-		producer,
-		1000, // буфер канала отправки в Kafka
+		outboxRepo,
+		cfg.KafkaTopic,
 		log.Default(),
 	)
-	flightSvc.StartDispatchWorker(ctx)
 
 	// 6) Kafka Consumer Group
 	consumer, err := kafka.NewConsumer(
@@ -77,8 +79,27 @@ func main() {
 	}
 	defer consumer.Close()
 
-	// 7) HTTP router
+	// 7) Outbox Sender Service (отдельная фоновая горутина)
+	outboxSender := service.NewOutboxSender(
+		outboxRepo,
+		producer,
+		cfg.OutboxPollInterval,
+		cfg.OutboxBatchSize,
+		cfg.OutboxRetentionDays,
+		cfg.OutboxMaxRetries,
+		log.Default(),
+	)
+	outboxSender.Start(ctx)
+
+	// 8) Метрики Prometheus
+	metrics.Register()
+	metrics.StartDBCollectors(ctx, dbPool, 10*time.Second, log.Default())
+
+	// 9) HTTP router
 	r := chi.NewRouter()
+	// middleware для метрик (и скрап /metrics)
+	r.Use(metrics.HTTPMiddleware)
+	r.Handle("/metrics", metrics.Handler())
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("OK"))
@@ -94,10 +115,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	// 8) Метрики — отключены по твоему требованию
-	log.Println("metrics: disabled (Prometheus/Grafana are not used)")
-
-	// 9) Запуск горутин
+	// 10) Запуск горутин
 	errCh := make(chan error, 2)
 
 	go func() {
@@ -113,7 +131,7 @@ func main() {
 		}
 	}()
 
-	// 10) Ожидание сигнала остановки или фатальной ошибки
+	// 11) Ожидание сигнала остановки или фатальной ошибки
 	select {
 	case err := <-errCh:
 		log.Printf("fatal runtime error: %v", err)
@@ -122,7 +140,7 @@ func main() {
 		log.Println("shutdown signal received")
 	}
 
-	// 11) Graceful shutdown
+	// 12) Graceful shutdown
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 

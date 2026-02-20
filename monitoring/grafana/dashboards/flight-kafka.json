@@ -1,0 +1,47 @@
+{
+  "uid": "flight-kafka",
+  "title": "Flight Service — Kafka",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "panels": [
+    { "type": "row", "title": "Kafka Throughput", "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 }, "collapsed": false },
+
+    {
+      "type": "timeseries",
+      "title": "Messages sent (per second)",
+      "gridPos": { "x": 0, "y": 1, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "rate(kafka_messages_sent_total[1m])", "legendFormat": "sent/s" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Messages processed (per second)",
+      "gridPos": { "x": 12, "y": 1, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "rate(kafka_messages_processed_total[1m])", "legendFormat": "processed/s" }
+      ]
+    },
+
+    { "type": "row", "title": "Kafka Lag & Errors", "gridPos": { "x": 0, "y": 9, "w": 24, "h": 1 }, "collapsed": false },
+
+    {
+      "type": "timeseries",
+      "title": "Consumer lag (by topic + partition)",
+      "gridPos": { "x": 0, "y": 10, "w": 24, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "kafka_consumer_lag", "legendFormat": "{{topic}} p{{partition}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Kafka errors (per second) by component+operation",
+      "gridPos": { "x": 0, "y": 18, "w": 24, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(kafka_errors_total[1m])) by (component, operation)", "legendFormat": "{{component}}/{{operation}}" }
+      ]
+    }
+  ]
+}

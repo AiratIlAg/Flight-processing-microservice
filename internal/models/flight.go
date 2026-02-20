@@ -1,6 +1,8 @@
 package models
 
-import "time"
+import (
+	"time"
+)
 
 type FlightRequest struct {
 	AircraftType    string    `json:"aircraft_type"`
