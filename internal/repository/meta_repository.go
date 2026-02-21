@@ -6,7 +6,6 @@ import (
 
 	"flight_processing/internal/models"
 
-	"flight_processing/internal/models"
 	sq "github.com/Masterminds/squirrel"
 	"github.com/jackc/pgx/v5"
 
