@@ -21,6 +21,11 @@ type Config struct {
 	OutboxBatchSize     int
 	OutboxMaxRetries    int
 	OutboxRetentionDays int
+
+	RedisAddr     string
+	RedisPassword string
+	RedisDB       int
+	RedisTTL      time.Duration
 }
 
 func Load() *Config {
@@ -39,6 +44,11 @@ func Load() *Config {
 		OutboxBatchSize:     mustIntEnv("OUTBOX_BATCH_SIZE", 100),
 		OutboxMaxRetries:    mustIntEnv("OUTBOX_MAX_RETRIES", 10),
 		OutboxRetentionDays: mustIntEnv("OUTBOX_RETENTION_DAYS", 7),
+
+		RedisAddr:     getEnv("REDIS_ADDR", "redis:6379"),
+		RedisPassword: getEnv("REDIS_PASSWORD", ""),
+		RedisDB:       mustIntEnv("REDIS_DB", 0),
+		RedisTTL:      time.Duration(mustIntEnv("REDIS_TTL", 300)) * time.Second,
 	}
 
 	return cfg

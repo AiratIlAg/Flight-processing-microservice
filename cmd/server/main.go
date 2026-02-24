@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flight_processing/internal/cache"
 	"flight_processing/internal/config"
 	"flight_processing/internal/handlers"
 	"flight_processing/internal/kafka"
@@ -66,12 +67,19 @@ func main() {
 		log.Default(),
 	)
 
+	//создаём кеш
+	rc := cache.NewRedisCache(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
+	defer rc.Close()
+
+	cache.StartRedisSizeCollector(ctx, rc.RawClient(), 30*time.Second, log.Default())
+
 	// 6) Kafka Consumer Group
 	consumer, err := kafka.NewConsumer(
 		cfg.KafkaBrokers,
 		cfg.KafkaGroupID,
 		cfg.KafkaTopic,
 		flightSvc, // важно: сервис реализует ProcessFlightMessage([]byte) error
+		rc,
 		log.Default(),
 	)
 	if err != nil {
@@ -105,7 +113,7 @@ func main() {
 		_, _ = w.Write([]byte("OK"))
 	})
 
-	h := handlers.NewFlightHandler(flightSvc)
+	h := handlers.NewFlightHandler(flightSvc, rc, cfg.RedisTTL)
 	handlers.RegisterFlightRoutes(r, h)
 
 	addr := ":" + cfg.HTTPPort

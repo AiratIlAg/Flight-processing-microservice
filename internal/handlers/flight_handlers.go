@@ -3,6 +3,8 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"flight_processing/internal/cache"
+	"flight_processing/internal/metrics"
 	"flight_processing/internal/models"
 	"flight_processing/internal/repository"
 	"flight_processing/internal/service"
@@ -20,15 +22,21 @@ type FlightService interface {
 	CreateFlight(request *models.FlightRequest) (int, error)
 	ProcessFlightMessage(message []byte) error
 	GetFlight(flightNumber string, departureDate time.Time) (*models.FlightData, error)
-	GetFlightMeta(flightNumber string, status string, limit int) (*models.FlightMetaResponse, error)
+	GetFlightMeta(flightNumber string, status string, limit int, offset int) (*models.FlightMetaResponse, error)
 }
 
 type FlightHandler struct {
 	service FlightService
+	cache   cache.Cache
+	ttl     time.Duration
 }
 
-func NewFlightHandler(service FlightService) *FlightHandler {
-	return &FlightHandler{service: service}
+func NewFlightHandler(service FlightService, cache cache.Cache, ttl time.Duration) *FlightHandler {
+	return &FlightHandler{
+		service: service,
+		cache:   cache,
+		ttl:     ttl,
+	}
 }
 
 // POST /api/flights
@@ -79,6 +87,20 @@ func (h *FlightHandler) GetFlight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 1) cache lookup
+	if h.cache != nil {
+		key := cache.FlightDataKey(flightNumber, departureDate)
+		if b, ok, err := h.cache.Get(r.Context(), key); err == nil && ok {
+			metrics.IncRedisHit()
+			w.Header().Set("X-Cache", "HIT")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(b)
+			return
+		}
+	}
+
+	// 2) DB via service
 	flight, err := h.service.GetFlight(flightNumber, departureDate)
 	if err != nil {
 		switch {
@@ -87,17 +109,28 @@ func (h *FlightHandler) GetFlight(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, repository.ErrNotFound):
 			writeError(w, http.StatusNotFound, "flight not found")
 		default:
-			writeError(w, http.StatusInternalServerError, "failed to get flight")
+			writeError(w, http.StatusInternalServerError, "internal error")
 		}
 		return
 	}
 
-	// По ТЗ здесь возвращаем минимальный набор полей.
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"flight_number":    flight.FlightNumber,
-		"departure_date":   flight.DepartureDate, // time.Time -> RFC3339 в JSON
+		"departure_date":   flight.DepartureDate,
 		"passengers_count": flight.PassengersCount,
-	})
+	}
+
+	b, _ := json.Marshal(resp)
+
+	// 3) cache store
+	if h.cache != nil {
+		key := cache.FlightDataKey(flightNumber, departureDate)
+		_ = h.cache.Set(r.Context(), key, b, h.ttl)
+	}
+
+	metrics.IncRedisMiss()
+	w.Header().Set("X-Cache", "MISS")
+	writeRawJSON(w, http.StatusOK, b)
 }
 
 // GET /api/flights/{flight_number}/meta?status=&limit=
@@ -126,18 +159,57 @@ func (h *FlightHandler) GetFlightMeta(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 
-	resp, err := h.service.GetFlightMeta(flightNumber, status, limit)
+	offset := 0
+	if offsetRaw := strings.TrimSpace(r.URL.Query().Get("offset")); offsetRaw != "" {
+		n, err := strconv.Atoi(offsetRaw)
+		if err != nil || n < 0 {
+			writeError(w, http.StatusBadRequest, "offset must be a non-negative integer")
+			return
+		}
+		offset = n
+	}
+
+	// 1) cache lookup
+	var cacheKey string
+	if h.cache != nil {
+		cacheKey = cache.FlightMetaKey(flightNumber, status, limit, offset)
+		if b, ok, err := h.cache.Get(r.Context(), cacheKey); err == nil && ok {
+			metrics.IncRedisHit()
+			w.Header().Set("X-Cache", "HIT")
+			writeRawJSON(w, http.StatusOK, b)
+			return
+		}
+	}
+
+	// 2) DB via service (нужно, чтобы сервис умел offset)
+	resp, err := h.service.GetFlightMeta(flightNumber, status, limit, offset)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidInput):
 			writeError(w, http.StatusBadRequest, err.Error())
 		default:
-			writeError(w, http.StatusInternalServerError, "failed to get flight meta")
+			writeError(w, http.StatusInternalServerError, "internal error")
 		}
 		return
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	b, _ := json.Marshal(resp)
+
+	// 3) cache store + remember key in set for invalidation
+	if h.cache != nil {
+		if cacheKey == "" {
+			cacheKey = cache.FlightMetaKey(flightNumber, status, limit, offset)
+		}
+		_ = h.cache.Set(r.Context(), cacheKey, b, h.ttl)
+
+		setKey := cache.FlightMetaKeysSetKey(flightNumber)
+		_ = h.cache.SAdd(r.Context(), setKey, cacheKey)
+		_ = h.cache.Expire(r.Context(), setKey, h.ttl)
+	}
+
+	metrics.IncRedisMiss()
+	w.Header().Set("X-Cache", "MISS")
+	writeRawJSON(w, http.StatusOK, b)
 }
 
 func decodeJSON(r *http.Request, dst any) error {
@@ -164,4 +236,10 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(data)
+}
+
+func writeRawJSON(w http.ResponseWriter, status int, b []byte) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(b)
 }

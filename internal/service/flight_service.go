@@ -151,7 +151,7 @@ func (s *FlightService) GetFlight(flightNumber string, departureDate time.Time) 
 	return s.flightRepo.Get(flightNumber, departureDate)
 }
 
-func (s *FlightService) GetFlightMeta(flightNumber string, status string, limit int) (*models.FlightMetaResponse, error) {
+func (s *FlightService) GetFlightMeta(flightNumber string, status string, limit int, offset int) (*models.FlightMetaResponse, error) {
 	if strings.TrimSpace(flightNumber) == "" {
 		return nil, fmt.Errorf("%w: flight_number is required", ErrInvalidInput)
 	}
@@ -167,7 +167,7 @@ func (s *FlightService) GetFlightMeta(flightNumber string, status string, limit 
 		limit = 100
 	}
 
-	metaRows, total, err := s.metaRepo.GetByFlightNumber(flightNumber, status, limit, 0)
+	metaRows, total, err := s.metaRepo.GetByFlightNumber(flightNumber, status, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("get meta by flight_number: %w", err)
 	}
