@@ -2,6 +2,8 @@ package kafka
 
 import (
 	"context"
+	"encoding/json"
+	"flight_processing/internal/cache"
 	"flight_processing/internal/metrics"
 	"fmt"
 	"log"
@@ -26,6 +28,7 @@ func NewConsumer(
 	groupID string,
 	topic string,
 	processor MessageProcessor,
+	c cache.Cache,
 	logger *log.Logger,
 ) (*Consumer, error) {
 	if logger == nil {
@@ -54,6 +57,7 @@ func NewConsumer(
 	h := &flightGroupHandler{
 		processor: processor,
 		logger:    logger,
+		cache:     c,
 	}
 
 	return &Consumer{
@@ -97,6 +101,7 @@ func (c *Consumer) Close() error {
 type flightGroupHandler struct {
 	processor MessageProcessor
 	logger    *log.Logger
+	cache     cache.Cache
 }
 
 func (h *flightGroupHandler) Setup(_ sarama.ConsumerGroupSession) error   { return nil }
@@ -119,6 +124,10 @@ func (h *flightGroupHandler) ConsumeClaim(
 		// (3) Успешная обработка
 		metrics.IncKafkaProcessed()
 
+		//(4) Инвалидация кеша
+		if h.cache != nil {
+			_ = h.invalidateCache(session.Context(), kafkaMsg.Value)
+		}
 		// Только после успеха:
 		session.MarkMessage(kafkaMsg, "")
 		session.Commit()
@@ -164,4 +173,31 @@ func retryBackoff(attempt int) time.Duration {
 		d = 30 * time.Second
 	}
 	return d
+}
+
+func (h *flightGroupHandler) invalidateCache(ctx context.Context, payload []byte) error {
+	// достаём flight_number и departure_date из Kafka payload
+	var x struct {
+		FlightNumber  string    `json:"flight_number"`
+		DepartureDate time.Time `json:"departure_date"`
+	}
+	if err := json.Unmarshal(payload, &x); err != nil {
+		return err
+	}
+	if x.FlightNumber == "" || x.DepartureDate.IsZero() {
+		return nil
+	}
+
+	// 1) удалить кеш конкретного рейса
+	_ = h.cache.Del(ctx, cache.FlightDataKey(x.FlightNumber, x.DepartureDate))
+
+	// 2) удалить все кеши meta по рейсу (через set ключей)
+	setKey := cache.FlightMetaKeysSetKey(x.FlightNumber)
+	keys, err := h.cache.SMembers(ctx, setKey)
+	if err == nil && len(keys) > 0 {
+		_ = h.cache.Del(ctx, keys...)
+	}
+	_ = h.cache.Del(ctx, setKey)
+
+	return nil
 }

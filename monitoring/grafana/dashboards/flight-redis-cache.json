@@ -1,0 +1,83 @@
+{
+  "uid": "flight-redis-cache",
+  "title": "Flight Service — Redis / Cache",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "panels": [
+    { "type": "row", "title": "Cache effectiveness", "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 }, "collapsed": false },
+
+    {
+      "type": "stat",
+      "title": "Cache Hit Ratio (5m)",
+      "gridPos": { "x": 0, "y": 1, "w": 6, "h": 6 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(redis_cache_hits_total[5m])) / (sum(rate(redis_cache_hits_total[5m])) + sum(rate(redis_cache_misses_total[5m])))"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Hits / Misses (per second)",
+      "gridPos": { "x": 6, "y": 1, "w": 18, "h": 6 },
+      "targets": [
+        { "refId": "A", "expr": "rate(redis_cache_hits_total[1m])", "legendFormat": "hits/s" },
+        { "refId": "B", "expr": "rate(redis_cache_misses_total[1m])", "legendFormat": "misses/s" }
+      ]
+    },
+
+    { "type": "row", "title": "Redis load & errors", "gridPos": { "x": 0, "y": 7, "w": 24, "h": 1 }, "collapsed": false },
+
+    {
+      "type": "timeseries",
+      "title": "Redis requests (by operation)",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(redis_requests_total[1m])) by (operation)",
+          "legendFormat": "{{operation}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Redis errors (by operation)",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(redis_errors_total[1m])) by (operation)",
+          "legendFormat": "{{operation}}"
+        }
+      ]
+    },
+
+    { "type": "row", "title": "Latency & size", "gridPos": { "x": 0, "y": 16, "w": 24, "h": 1 }, "collapsed": false },
+
+    {
+      "type": "timeseries",
+      "title": "Redis latency p95 (seconds) by operation",
+      "gridPos": { "x": 0, "y": 17, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum(rate(redis_request_duration_seconds_bucket[5m])) by (le, operation))",
+          "legendFormat": "{{operation}} p95"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Redis cache size (bytes)",
+      "gridPos": { "x": 12, "y": 17, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "redis_cache_size_bytes", "legendFormat": "used_memory" }
+      ]
+    }
+  ]
+}

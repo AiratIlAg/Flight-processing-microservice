@@ -158,6 +158,7 @@ func Register() {
 			outboxLagSeconds,
 			outboxPendingCount,
 		)
+		registerRedisMetrics()
 	})
 }
 
