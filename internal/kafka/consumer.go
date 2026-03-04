@@ -123,6 +123,7 @@ func (h *flightGroupHandler) ConsumeClaim(
 		}
 		// (3) Успешная обработка
 		metrics.IncKafkaProcessed()
+		InvalidateCacheFromKafkaMessage(session.Context(), h.cache, kafkaMsg.Value)
 
 		//(4) Инвалидация кеша
 		if h.cache != nil {
