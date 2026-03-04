@@ -3,18 +3,29 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"flight_processing/internal/kafka"
 	"flight_processing/internal/metrics"
 	"flight_processing/internal/models"
-	"flight_processing/internal/repository"
 	"fmt"
 	"log"
 	"time"
 )
 
+// Интерфейсы для удобного мокинга в юнит-тестах.
+type OutboxRepo interface {
+	GetPendingMessages(limit int) ([]*models.OutboxMessage, error)
+	MarkAsSent(messageID string) error
+	MarkAsFailed(messageID string, errorMsg string) error
+	CleanupOldMessages(retentionDays int) (int, error)
+}
+
+type KafkaProducer interface {
+	SendRaw(topic string, key string, payload []byte) error
+}
+
 type OutboxSender struct {
-	repo          *repository.OutboxRepository
-	producer      *kafka.Producer
+	repo     OutboxRepo
+	producer KafkaProducer
+
 	pollInterval  time.Duration
 	batchSize     int
 	retentionDays int
@@ -25,8 +36,8 @@ type OutboxSender struct {
 }
 
 func NewOutboxSender(
-	repo *repository.OutboxRepository,
-	producer *kafka.Producer,
+	repo OutboxRepo,
+	producer KafkaProducer,
 	pollInterval time.Duration,
 	batchSize int,
 	retentionDays int,
